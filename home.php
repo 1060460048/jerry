@@ -8,18 +8,40 @@ if(($user=isLogin())==false){
 //来到这个界面，把推送的消息，即你关注的那些人发的微博给接收过来
 //取出自己发的和你所关注的用户发的微博
 $r=connredis();
+//获取我关注的人
+$star=$r->smembers('following:'.$user['userid']);
+$star[]=$user['userid'];
+
+$lastpull=$r->get('lastpull:userid:'.$user['userid']);
+if(!$lastpull){
+    $lastpull=0;
+}
+
+//拉取最新数据,每个我关注的人取20条数据但是不一定全要，之前取过的不要，只要最新的
+$latest=array();
+foreach($star as $s){
+    $latest=array_merge($latest,$r->zrangebyscore('starpost:userid:'.$s,$lastpull+1,4294967296));
+}
+sort($latest,SORT_NUMERIC);
+//更新lastpull
+if(!empty($latest)){
+    $r->set('lastpull:userid:'.$user['userid'],end($latest));
+}
+//循环把$latest放到自己主页应该收取的微博链接里
+foreach($latest as $l){
+    $r->lpush('recievepost:'.$user['userid'],$l);
+}
+
+//保持个人主页是多收取1000条数据
+$r->ltrim('recievepost:'.$user['userid'],0,999);
+
+//假如所有关注的人的信息都更新完毕，我们要更新一下lastpull变量的值
 //先做测试只取50条微博信息
 $r->ltrim('recievepost:'.$user['userid'],0,49);
-//我想要的并不是推给你的postid，而是要它具体的内容
-//第二个参数用数组指定取数据遵从原则，按倒序取，取什么用get来指定
-//改成存hash结构里这里就不能这么来取了
-//$newpost=$r->sort('recievepost:'.$user['userid'],array('sort'=>'desc','get'=>'post:postid:*:content'));
+
 //现在这行是用hash结构存储微博
 $newpost=$r->sort('recievepost:'.$user['userid'],array('sort'=>'desc'));
 
-foreach($newpost as $postid){
-    $r->hmget('post:postid:'.$postid,array('userid','username','time','content'));
-}
 //计算几个粉丝，几个关注这个比较简单
 //计算集合的元素个数
 $myfans=$r->scard('followed:'.$user['userid']);

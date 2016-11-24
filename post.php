@@ -24,7 +24,6 @@
  */
 include('./lib.php');
 include('./header.php');
-
 $content=P('status');
 if(!$content){
     error("请填写内容");
@@ -42,18 +41,34 @@ $postid=$r->incr('global:postid');
 //$r->set('post:postid:'.$postid.':content',$content);
 //把每个数值单独作为一个键，不是最优选型，这个时候用哈希结构来存
 $r->hmset('post:postid:'.$postid,array('userid'=>$user['userid'],'username'=>$user['username'],'time'=>time(),'content'=>$content));
-
-//有两种解决方式，一种是把自己的follower都遍历，并取他们发布的内容，第二种方式是发微博的同时，把微博同时推给自己的粉丝
-//先把自己的粉丝拿到
-$fans=$r->smembers('followed:'.$user['userid']);
-//print_r($fans);die;
-//知道了自己有哪些粉丝，挨个给他们推
-$fans[]=$user['userid'];
-//还要维护两张表，一张表是recievepost就是你推给哪些粉丝用户看了你的消息，要把读你消息的这些用户？一定读了吗？不一定读了但是发生了推送行为
-foreach($fans as $fansid){
-    //由于要存好多数据呢，依然选用链表的形式，之前哪个部分是用了链表的形式？
-    $r->lpush('recievepost:'.$fansid,$postid);
+//把自己的发的微博维护在一个有序集合中,只要前20个,有序集合并不合适，用链表，为什么有序集合不合适，与之前存字串没有区别了，是给取数据造成难度了吗？
+//难取的理由是什么，是有序集合要设置key，value写的时候有三个参数，而链表只有两个参数，所以用链表吗？
+//$r->zadd('user:userid:'.$user['userid'],$postid,$postid);
+$r->zadd('starpost:userid:'.$user['userid'],$postid,$postid);
+//我们用zcard来度量一下有序集合的长度，如果有序集合的长度大于20的话，那么我们进行删除,什么含义，只保留20条显示嘛?把旧的删掉，是指什么旧的，保留的目的是使哪个部分的数据始终保持最新吗？是因为要删除的数据要写入到mysql中吗？
+if($r->zcard('starpost:userid:'.$user['userid']) > 20){
+    //后两个参数从0到0是把旧的给删掉
+    $r->zremrangebyrank('starpost:userid:'.$user['userid'],0,0);
 }
+
+//把自己的微博id,放在一个链表里，1000个，目的是什么？自己看自己的微博用的,1000个之前的旧微博会放到mYsql中存起来
+$r->lpush('mypost:userid:'.$user['userid'],$postid);
+if($r->llen('mypost:userid:'.$user['userid']) > 10){
+    $r->rpoplpush('mypost:userid:'.$user['userid'],'global:store');
+}
+
 header('Location: home.php');
 exit;
 include('./footer.php');
+
+
+
+
+
+
+
+
+
+
+
+
